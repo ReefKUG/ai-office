@@ -1,9 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Mistral } from "@mistralai/mistralai";
 import { DEPARTMENTS, PRICES, type Department } from "./config.js";
 
 const anthropic = new Anthropic();
 const openai = new OpenAI();
+const google = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? "");
+const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY ?? "" });
 
 export interface LlmResult {
   department: Department;
@@ -51,13 +55,51 @@ export const callLlm = async (
     };
   }
 
-  const response = await openai.chat.completions.create({
+  if (provider === "openai") {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = response.choices[0]?.message?.content ?? "";
+    const inputTokens = response.usage?.prompt_tokens ?? 0;
+    const outputTokens = response.usage?.completion_tokens ?? 0;
+    return {
+      department,
+      provider,
+      model,
+      text,
+      inputTokens,
+      outputTokens,
+      costUsd: costOf(model, inputTokens, outputTokens),
+      durationMs: Date.now() - start,
+    };
+  }
+
+  if (provider === "google") {
+    const response = await google.getGenerativeModel({ model }).generateContent(prompt);
+    const text = response.response.text();
+    const inputTokens = response.response.usageMetadata?.promptTokenCount ?? 0;
+    const outputTokens = response.response.usageMetadata?.candidatesTokenCount ?? 0;
+    return {
+      department,
+      provider,
+      model,
+      text,
+      inputTokens,
+      outputTokens,
+      costUsd: costOf(model, inputTokens, outputTokens),
+      durationMs: Date.now() - start,
+    };
+  }
+
+  const response = await mistral.chat.complete({
     model,
     messages: [{ role: "user", content: prompt }],
   });
-  const text = response.choices[0]?.message?.content ?? "";
-  const inputTokens = response.usage?.prompt_tokens ?? 0;
-  const outputTokens = response.usage?.completion_tokens ?? 0;
+  const firstContent = response.choices?.[0]?.message?.content;
+  const text = typeof firstContent === "string" ? firstContent : "";
+  const inputTokens = response.usage.promptTokens ?? 0;
+  const outputTokens = response.usage.completionTokens ?? 0;
   return {
     department,
     provider,

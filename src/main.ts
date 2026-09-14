@@ -7,7 +7,7 @@ const main = async () => {
   for (const department of Object.keys(DEPARTMENTS) as Department[]) {
     const result = await callLlm(
       department,
-      "In one short sentence, introduce yourself as this department of a software office.",
+      `In one short sentence, introduce yourself as the "${department}" department of a software office.`,
     );
     totalCost += result.costUsd;
     console.log(
