@@ -1,22 +1,24 @@
-import { DEPARTMENTS, type Department } from "./config.js";
-import { callLlm } from "./llm.js";
+import type { SpecArtifact } from "../docs/office-contracts.js";
+import { saveArtifact } from "./store.js";
+import { runTask } from "./orchestrator.js";
 
 const main = async () => {
-  let totalCost = 0;
+  const spec = saveArtifact<SpecArtifact>({
+    type: "spec",
+    title: "FizzBuzz function",
+    description: "A TypeScript function fizzbuzz(n: number): string[] returning FizzBuzz output for 1..n.",
+    acceptanceCriteria: [
+      "Multiples of 3 return 'Fizz'",
+      "Multiples of 5 return 'Buzz'",
+      "Multiples of both 3 and 5 return 'FizzBuzz'",
+      "All other numbers return their own string value",
+    ],
+  });
 
-  for (const department of Object.keys(DEPARTMENTS) as Department[]) {
-    const result = await callLlm(
-      department,
-      `In one short sentence, introduce yourself as the "${department}" department of a software office.`,
-    );
-    totalCost += result.costUsd;
-    console.log(
-      `[${department}] ${result.provider}/${result.model} — ${result.durationMs}ms, $${result.costUsd.toFixed(4)}`,
-    );
-    console.log(`  ${result.text.trim()}`);
-  }
+  const result = await runTask(spec.id);
 
-  console.log(`\nTotal cost: $${totalCost.toFixed(4)}`);
+  console.log(`\nFinal status: ${result.review.passed ? "PASS" : "FAIL"} after ${result.loops} loop(s)`);
+  console.log(`Total cost: $${result.totalCostUsd.toFixed(4)}`);
 };
 
 main();

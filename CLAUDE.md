@@ -23,13 +23,17 @@ made visible through metrics.
 - Phase 3: Angular UI (office floor, task board, approvals, cost dashboard), user picks model per department.
 - Phase 4: Research + Architecture departments, smart model routing per task.
 
-## Phase 0 status
-- Step 1 (written, not yet run): `src/config.ts` (hardcoded models + prices),
-  `src/llm.ts` (`callLlm` wraps Anthropic + OpenAI behind one interface, returns
-  text/tokens/cost/duration), `src/main.ts` (hello test for each agent).
-- Step 2 (next): Dev and QA agents.
-- Step 3: the loop with a budget cap.
+## Phase 0 status — complete
+- Step 1: `src/config.ts` (hardcoded models + prices), `src/llm.ts` (`callLlm` wraps
+  Anthropic/OpenAI/Google/Mistral behind one interface, returns text/tokens/cost/duration).
+- Step 2: `docs/office-contracts.ts` (Spec/Code/Review artifact types), `src/store.ts`
+  (in-memory artifact store keyed by ID), `src/agents/dev.ts` + `src/agents/qa.ts`
+  (pure prompt builders — the orchestrator resolves artifact IDs and passes them in).
+- Step 3: `src/orchestrator.ts` runs Spec → build → review, looping build ↔ review
+  on FAIL until PASS, `BUDGET_CAP_USD`, or `MAX_REVIEW_LOOPS` is hit. `src/main.ts`
+  seeds a sample spec and prints total cost. Verified working end-to-end.
 - Decision: model selection stays hardcoded in `config.ts` until Phase 3. Keep it simple.
+- Next: Phase 1 (Fastify + Prisma + Postgres, orchestrator as a state machine, BullMQ).
 
 ## Conventions
 - pnpm, TypeScript, ESM (`"type": "module"`), run with `pnpm exec tsx --env-file=.env src/main.ts`
