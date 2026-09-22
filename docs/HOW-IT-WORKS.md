@@ -87,6 +87,67 @@ Each one is a pure "text in, text out" function:
   (and on a retry, *"...QA feedback on the previous revision: ..."*)
 - QA sees: *"Here's a spec and some code. Reply PASS or FAIL and why."*
 
-That's the whole system for Phase 0. Phase 1 replaces the in-memory `Map` in
-`store.ts` with a real Postgres database and turns the orchestrator into a
-proper job queue (BullMQ) — the ticket/ID model itself doesn't change.
+That's the whole system for Phase 0.
+
+# How Phase 1 works
+
+Phase 1 replaces the in-memory `Map` in `store.ts` with a real Postgres
+database, adds a Fastify server so tasks can be submitted over HTTP instead
+of hardcoded in `main.ts`, and turns the orchestrator's single blocking loop
+into BullMQ jobs — the ticket/ID model itself doesn't change.
+
+## The 5 new pieces
+
+| Piece | Role | Analogy |
+|---|---|---|
+| **Postgres** | Permanent storage for Spec/Code/Review tickets. Replaces `store.ts`'s `Map`. | A filing cabinet — survives restarts. |
+| **Prisma** | Lets the app read/write Postgres using typed TypeScript (`prisma.spec.create(...)`) instead of raw SQL. | A typed client generated from your DB schema, like a typed API client generated from an OpenAPI spec. |
+| **Fastify** | Web server. Listens for HTTP requests (`POST /tasks`, `GET /tasks/:id`) instead of `main.ts` hardcoding one sample spec. | Angular's `HttpClient`, but receiving requests instead of sending them. |
+| **BullMQ** | Job queue. Turns each Build/Review step into a job a worker picks up, so the API doesn't block for 30+ seconds of LLM calls. | An NgRx effect — dispatch an action, a worker handles it async, then dispatches the next one. |
+| **Redis** | In-memory store BullMQ uses to track pending/running jobs. Not a source of truth — just the in-tray. | An `RxJS Subject` many workers can pull jobs from. |
+
+## How they connect, using our own flow
+
+```
+POST /tasks (a Spec)
+      │
+      ▼
+ 1. Fastify route ──── 2. Prisma saves Spec ──── 3. Postgres
+      │
+      ▼
+ 4. Enqueue "build" job ──── 5. BullMQ writes it ──── 6. Redis
+                                                          │
+                                                          ▼
+                                          7. Build worker picks it up,
+                                             calls callLlm("build", ...),
+                                             saves Code via Prisma,
+                                             enqueues a "review" job
+                                                          │
+                                                          ▼
+                                          8. Review worker: same pattern,
+                                             saves Review, and either
+                                             enqueues another "build" job
+                                             (on FAIL) or marks the task
+                                             done (on PASS/caps hit)
+```
+
+1. **The entry point (Fastify):** a client (you, curl, or eventually the
+   Phase 3 UI) posts a Spec to `/tasks`.
+2. **Saving the data (Prisma → Postgres):** the route handler saves the Spec
+   as a row and gets back an ID — same concept as `saveArtifact` today, just
+   backed by a real table instead of a `Map`.
+3. **Handing off the work (Fastify → BullMQ):** the route doesn't wait
+   around for the LLM calls. It enqueues a `build` job and responds
+   immediately with the task ID.
+4. **The queue (BullMQ → Redis):** the job description ("build code for spec
+   X") is written to Redis, which can track pending jobs instantly since
+   it's all in RAM.
+5. **The background worker:** a separate process pulls the job off the
+   queue, does the actual `callLlm` call (this is the slow part), saves the
+   result, and enqueues whatever comes next — exactly mirroring today's
+   `runTask` loop, just spread across independent, resumable steps instead
+   of one function that blocks until everything finishes.
+
+Same budget cap, same review-loop cap, same "QA must use a different
+provider than Build" rule — they just move from a `while` loop's local
+variables into checks the worker makes before enqueuing the next job.
