@@ -51,3 +51,62 @@ before they're used to drive real budget decisions.
   Total cost: **$0.0031**.
 
 Next up: Phase 0 Step 2 — Build and Review agents.
+
+## 2026-09-15 — Session summary
+
+- Completed Phase 0 Step 2 and Step 3, finishing Phase 0.
+- Added `docs/office-contracts.ts`: the three artifact ("ticket") types —
+  `SpecArtifact`, `CodeArtifact`, `ReviewArtifact` — each referencing the
+  others by ID only (`specId`, `codeId`, `previousReviewId`), never by
+  embedding the full document.
+- Added `src/store.ts`: an in-memory `Map<string, Artifact>` (`saveArtifact` /
+  `getArtifact`) standing in for a real database until Phase 1.
+- Added `src/agents/dev.ts` and `src/agents/qa.ts`: pure prompt-builder
+  functions for the Build and Review departments. `buildDevPrompt` takes the
+  spec and, on a retry, the previous review's feedback. `buildQaPrompt` takes
+  the spec + code; `parseQaResponse` reads the PASS/FAIL verdict back out.
+  Neither file does any I/O or touches the store — the orchestrator resolves
+  IDs and hands them only the content they need.
+- Added `src/orchestrator.ts` (`runTask`): Spec → Build → Review, looping
+  Build ↔ Review on FAIL until PASS, `BUDGET_CAP_USD` ($1), or
+  `MAX_REVIEW_LOOPS` (3) is hit.
+- Rewrote `src/main.ts` to seed one real sample spec (FizzBuzz) and run it
+  through `runTask`, printing final PASS/FAIL and total cost, replacing the
+  old hello-test loop.
+- Fixed a `tsconfig.json` build error: `rootDir` was `src`, but
+  `office-contracts.ts` lives in `docs/` — widened `rootDir` to `.` and added
+  `docs` to `include`.
+- Added `docs/HOW-IT-WORKS.md`: a plain-language walkthrough of the whole
+  flow, for onboarding/reference — departments never talk to each other
+  directly, only the orchestrator resolves tickets and calls each one in turn.
+- Verified end-to-end with a real run: Build (Anthropic) wrote FizzBuzz,
+  Review (OpenAI) passed it first try. Total cost: **$0.0035**.
+- Committed as `4d54b9c`.
+
+Next up: Phase 1 — Fastify + Prisma + Postgres, orchestrator as a state
+machine, BullMQ jobs. Not started yet by user request.
+
+## 2026-09-22 — Session summary
+
+- Started Phase 1. User installed Docker Desktop.
+- Added `docker-compose.yml`: two services, `postgres:16` (user/password/db
+  all `office`, port `5432`, persisted to a named volume `postgres_data` so
+  data survives container restarts) and `redis:7` (port `6379`, no
+  persistence needed — it's just BullMQ's job queue backend, not a source of
+  truth).
+- Ran `docker compose up -d` — pulled both images and started both
+  containers in the background. Verified both `Up` via `docker compose ps`:
+  `ai-office-postgres-1` on `localhost:5432`, `ai-office-redis-1` on
+  `localhost:6379`.
+- Nothing in the app code talks to either yet — no npm packages installed,
+  no Prisma schema, no Fastify server, no BullMQ queue. That's all still
+  ahead.
+- Paused here by user request (new to backend, wanted a detailed walkthrough
+  of Docker concepts — images vs containers, ports, volumes — before going
+  further).
+
+Next up: Step 2 of Phase 1 — install `fastify`, `prisma` + `@prisma/client`,
+`bullmq`, `ioredis` via pnpm. No schema or app code changes yet, just adding
+the packages. After that: write `prisma/schema.prisma` mirroring the
+artifact types in `docs/office-contracts.ts` (Spec/Code/Review) and run the
+first migration against the Postgres container already running.
