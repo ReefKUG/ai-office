@@ -1,0 +1,65 @@
+// Database version of docs/office-contracts.ts.
+// Artifacts reference each other by ID (foreign keys), never embed each other.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Spec {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String
+  acceptanceCriteria String[]
+  createdAt          DateTime @default(now())
+
+  codes   Code[]
+  reviews Review[]
+}
+
+model Code {
+  id               String   @id @default(cuid())
+  specId           String
+  spec             Spec     @relation(fields: [specId], references: [id])
+  revision         Int // 1 on first Dev pass, incremented on each revision
+  previousReviewId String? // the review this revision answers (plain ID, no relation to avoid a Code <-> Review cycle)
+  code             String
+  createdAt        DateTime @default(now())
+
+  reviews  Review[]
+  llmCalls LlmCall[]
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  specId    String
+  spec      Spec     @relation(fields: [specId], references: [id])
+  codeId    String
+  code      Code     @relation(fields: [codeId], references: [id])
+  passed    Boolean
+  feedback  String
+  createdAt DateTime @default(now())
+
+  llmCalls LlmCall[]
+}
+
+// One row per LLM call. A build call fills codeId, a review call fills reviewId.
+model LlmCall {
+  id           String   @id @default(cuid())
+  department   String
+  provider     String
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Decimal  @db.Decimal(12, 6)
+  durationMs   Int
+  codeId       String?
+  code         Code?    @relation(fields: [codeId], references: [id])
+  reviewId     String?
+  review       Review?  @relation(fields: [reviewId], references: [id])
+  createdAt    DateTime @default(now())
+}
