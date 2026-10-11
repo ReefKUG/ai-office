@@ -1,9 +1,9 @@
-import type { SpecArtifact } from "../docs/office-contracts.js";
-import { saveArtifact } from "./store.js";
+import { prisma } from "./db.js";
+import { saveSpec } from "./store.js";
 import { runTask } from "./orchestrator.js";
 
 const main = async () => {
-  const spec = saveArtifact<SpecArtifact>({
+  const spec = await saveSpec({
     type: "spec",
     title: "FizzBuzz function",
     description: "A TypeScript function fizzbuzz(n: number): string[] returning FizzBuzz output for 1..n.",
@@ -21,4 +21,5 @@ const main = async () => {
   console.log(`Total cost: $${result.totalCostUsd.toFixed(4)}`);
 };
 
-main();
+// Close the DB pool so the process can exit, even if the task failed.
+main().finally(() => prisma.$disconnect());

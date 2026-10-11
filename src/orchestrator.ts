@@ -1,9 +1,9 @@
 import { BUDGET_CAP_USD, MAX_REVIEW_LOOPS } from "./config.js";
 import { callLlm } from "./llm.js";
-import { getArtifact, saveArtifact } from "./store.js";
+import { getSpec, saveCode, saveLlmCall, saveReview } from "./store.js";
 import { buildDevPrompt, toCodeArtifact } from "./agents/dev.js";
 import { buildQaPrompt, parseQaResponse, toReviewArtifact } from "./agents/qa.js";
-import type { CodeArtifact, ReviewArtifact, SpecArtifact } from "../docs/office-contracts.js";
+import type { CodeArtifact, ReviewArtifact } from "../docs/office-contracts.js";
 
 export interface TaskResult {
   code: CodeArtifact;
@@ -14,7 +14,7 @@ export interface TaskResult {
 
 // Spec -> Dev -> QA, looping Dev <-> QA on failure until pass, budget cap, or max loops.
 export const runTask = async (specId: string): Promise<TaskResult> => {
-  const spec = getArtifact<SpecArtifact>(specId);
+  const spec = await getSpec(specId);
 
   let totalCostUsd = 0;
   let previousReview: ReviewArtifact | undefined;
@@ -29,9 +29,8 @@ export const runTask = async (specId: string): Promise<TaskResult> => {
 
     const devResult = await callLlm("build", buildDevPrompt(spec, previousReview));
     totalCostUsd += devResult.costUsd;
-    code = saveArtifact<CodeArtifact>(
-      toCodeArtifact(spec.id, loop, devResult.text, previousReview?.id),
-    );
+    code = await saveCode(toCodeArtifact(spec.id, loop, devResult.text, previousReview?.id));
+    await saveLlmCall(devResult, { codeId: code.id });
     console.log(
       `[build] revision ${loop} — ${devResult.provider}/${devResult.model}, $${devResult.costUsd.toFixed(4)}`,
     );
@@ -39,7 +38,8 @@ export const runTask = async (specId: string): Promise<TaskResult> => {
     const qaResult = await callLlm("review", buildQaPrompt(spec, code));
     totalCostUsd += qaResult.costUsd;
     const { passed, feedback } = parseQaResponse(qaResult.text);
-    review = saveArtifact<ReviewArtifact>(toReviewArtifact(spec.id, code.id, passed, feedback));
+    review = await saveReview(toReviewArtifact(spec.id, code.id, passed, feedback));
+    await saveLlmCall(qaResult, { reviewId: review.id });
     console.log(
       `[review] revision ${loop} — ${qaResult.provider}/${qaResult.model}, $${qaResult.costUsd.toFixed(4)} — ${passed ? "PASS" : "FAIL"}`,
     );
