@@ -1,54 +1,88 @@
 import { BUDGET_CAP_USD, MAX_REVIEW_LOOPS } from "./config.js";
 import { callLlm } from "./llm.js";
-import { getSpec, saveCode, saveLlmCall, saveReview } from "./store.js";
+import {
+  createTask,
+  getCode,
+  getReview,
+  getSpec,
+  getTask,
+  saveCode,
+  saveLlmCall,
+  saveReview,
+  updateTask,
+} from "./store.js";
 import { buildDevPrompt, toCodeArtifact } from "./agents/dev.js";
 import { buildQaPrompt, parseQaResponse, toReviewArtifact } from "./agents/qa.js";
-import type { CodeArtifact, ReviewArtifact } from "../docs/office-contracts.js";
+import type { Task, TaskStatus } from "../docs/office-contracts.js";
 
-export interface TaskResult {
-  code: CodeArtifact;
-  review: ReviewArtifact;
-  totalCostUsd: number;
-  loops: number;
-}
+// State machine for Spec -> Build <-> Review. All state lives in the Task row, so each
+// step is independent and resumable (later: one BullMQ job per step).
+//
+//   BUILDING ──> REVIEWING ──> PASSED
+//      ^             │
+//      └── FAIL ─────┤──> FAILED_MAX_LOOPS (loop limit hit)
+//                    └──> FAILED_BUDGET    (checked before every LLM call)
 
-// Spec -> Dev -> QA, looping Dev <-> QA on failure until pass, budget cap, or max loops.
-export const runTask = async (specId: string): Promise<TaskResult> => {
-  const spec = await getSpec(specId);
+const FINAL_STATUSES: TaskStatus[] = ["PASSED", "FAILED_MAX_LOOPS", "FAILED_BUDGET"];
 
-  let totalCostUsd = 0;
-  let previousReview: ReviewArtifact | undefined;
-  let code: CodeArtifact | undefined;
-  let review: ReviewArtifact | undefined;
+export const isFinal = (task: Task): boolean => {
+  return FINAL_STATUSES.includes(task.status);
+};
 
-  for (let loop = 1; loop <= MAX_REVIEW_LOOPS; loop++) {
-    if (totalCostUsd >= BUDGET_CAP_USD) {
-      console.log(`Budget cap of $${BUDGET_CAP_USD.toFixed(2)} reached — stopping.`);
-      break;
-    }
+export const startTask = async (specId: string): Promise<Task> => {
+  return createTask(specId);
+};
 
-    const devResult = await callLlm("build", buildDevPrompt(spec, previousReview));
-    totalCostUsd += devResult.costUsd;
-    code = await saveCode(toCodeArtifact(spec.id, loop, devResult.text, previousReview?.id));
-    await saveLlmCall(devResult, { codeId: code.id });
-    console.log(
-      `[build] revision ${loop} — ${devResult.provider}/${devResult.model}, $${devResult.costUsd.toFixed(4)}`,
-    );
+// Dev writes code for the spec, answering the last review if there is one.
+const build = async (task: Task): Promise<Task> => {
+  const spec = await getSpec(task.specId);
+  const previousReview = task.lastReviewId ? await getReview(task.lastReviewId) : undefined;
+  const loop = task.loop + 1;
 
-    const qaResult = await callLlm("review", buildQaPrompt(spec, code));
-    totalCostUsd += qaResult.costUsd;
-    const { passed, feedback } = parseQaResponse(qaResult.text);
-    review = await saveReview(toReviewArtifact(spec.id, code.id, passed, feedback));
-    await saveLlmCall(qaResult, { reviewId: review.id });
-    console.log(
-      `[review] revision ${loop} — ${qaResult.provider}/${qaResult.model}, $${qaResult.costUsd.toFixed(4)} — ${passed ? "PASS" : "FAIL"}`,
-    );
+  const result = await callLlm("build", buildDevPrompt(spec, previousReview));
+  const code = await saveCode(toCodeArtifact(spec.id, loop, result.text, previousReview?.id));
+  await saveLlmCall(result, { codeId: code.id });
+  console.log(`[build] revision ${loop} — ${result.provider}/${result.model}, $${result.costUsd.toFixed(4)}`);
 
-    if (passed) break;
-    previousReview = review;
+  return updateTask(task.id, {
+    status: "REVIEWING",
+    loop,
+    lastCodeId: code.id,
+    totalCostUsd: task.totalCostUsd + result.costUsd,
+  });
+};
+
+// QA checks the latest code against the spec's acceptance criteria.
+const review = async (task: Task): Promise<Task> => {
+  if (!task.lastCodeId) throw new Error(`Task "${task.id}" is REVIEWING but has no code`);
+  const spec = await getSpec(task.specId);
+  const code = await getCode(task.lastCodeId);
+
+  const result = await callLlm("review", buildQaPrompt(spec, code));
+  const { passed, feedback } = parseQaResponse(result.text);
+  const saved = await saveReview(toReviewArtifact(spec.id, code.id, passed, feedback));
+  await saveLlmCall(result, { reviewId: saved.id });
+  console.log(
+    `[review] revision ${task.loop} — ${result.provider}/${result.model}, $${result.costUsd.toFixed(4)} — ${passed ? "PASS" : "FAIL"}`,
+  );
+
+  const status: TaskStatus = passed ? "PASSED" : task.loop >= MAX_REVIEW_LOOPS ? "FAILED_MAX_LOOPS" : "BUILDING";
+  return updateTask(task.id, {
+    status,
+    lastReviewId: saved.id,
+    totalCostUsd: task.totalCostUsd + result.costUsd,
+  });
+};
+
+// Runs exactly one step and returns the task's new state. Final tasks are returned unchanged.
+export const advanceTask = async (taskId: string): Promise<Task> => {
+  const task = await getTask(taskId);
+  if (isFinal(task)) return task;
+
+  if (task.totalCostUsd >= BUDGET_CAP_USD) {
+    console.log(`Budget cap of $${BUDGET_CAP_USD.toFixed(2)} reached — stopping.`);
+    return updateTask(task.id, { status: "FAILED_BUDGET" });
   }
 
-  if (!code || !review) throw new Error("Task produced no code/review — MAX_REVIEW_LOOPS is 0?");
-
-  return { code, review, totalCostUsd, loops: code.revision };
+  return task.status === "BUILDING" ? build(task) : review(task);
 };
