@@ -29,3 +29,16 @@ export interface ReviewArtifact {
 }
 
 export type Artifact = SpecArtifact | CodeArtifact | ReviewArtifact;
+
+// Orchestrator state — not an artifact. Tracks where a task is in the Build <-> Review loop.
+export type TaskStatus = "BUILDING" | "REVIEWING" | "PASSED" | "FAILED_MAX_LOOPS" | "FAILED_BUDGET";
+
+export interface Task {
+  id: string;
+  specId: string;
+  status: TaskStatus;
+  loop: number; // Build passes done so far
+  totalCostUsd: number;
+  lastCodeId?: string;
+  lastReviewId?: string;
+}

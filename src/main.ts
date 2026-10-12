@@ -1,6 +1,6 @@
 import { prisma } from "./db.js";
 import { saveSpec } from "./store.js";
-import { runTask } from "./orchestrator.js";
+import { advanceTask, isFinal, startTask } from "./orchestrator.js";
 
 const main = async () => {
   const spec = await saveSpec({
@@ -15,10 +15,14 @@ const main = async () => {
     ],
   });
 
-  const result = await runTask(spec.id);
+  // Step the state machine until it stops. In the next phase a BullMQ worker does this instead.
+  let task = await startTask(spec.id);
+  while (!isFinal(task)) {
+    task = await advanceTask(task.id);
+  }
 
-  console.log(`\nFinal status: ${result.review.passed ? "PASS" : "FAIL"} after ${result.loops} loop(s)`);
-  console.log(`Total cost: $${result.totalCostUsd.toFixed(4)}`);
+  console.log(`\nFinal status: ${task.status} after ${task.loop} loop(s)`);
+  console.log(`Total cost: $${task.totalCostUsd.toFixed(4)}`);
 };
 
 // Close the DB pool so the process can exit, even if the task failed.

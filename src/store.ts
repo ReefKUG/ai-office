@@ -1,7 +1,7 @@
 import { prisma } from "./db.js";
-import type { Code, Review, Spec } from "../generated/prisma/client.js";
+import type { Code, Review, Spec, Task as TaskRow } from "../generated/prisma/client.js";
 import type { LlmResult } from "./llm.js";
-import type { CodeArtifact, ReviewArtifact, SpecArtifact } from "../docs/office-contracts.js";
+import type { CodeArtifact, ReviewArtifact, SpecArtifact, Task } from "../docs/office-contracts.js";
 
 // Postgres-backed artifact store. Each artifact type has its own table; the DB generates IDs.
 // Rows are mapped back to the contract types so the rest of the app never sees Prisma types.
@@ -30,6 +30,16 @@ const toReview = (row: Review): ReviewArtifact => ({
   codeId: row.codeId,
   passed: row.passed,
   feedback: row.feedback,
+});
+
+const toTask = (row: TaskRow): Task => ({
+  id: row.id,
+  specId: row.specId,
+  status: row.status,
+  loop: row.loop,
+  totalCostUsd: row.totalCostUsd.toNumber(),
+  lastCodeId: row.lastCodeId ?? undefined,
+  lastReviewId: row.lastReviewId ?? undefined,
 });
 
 export const saveSpec = async ({ type, ...data }: Omit<SpecArtifact, "id">): Promise<SpecArtifact> => {
@@ -68,4 +78,22 @@ export const saveLlmCall = async (
   link: { codeId: string } | { reviewId: string },
 ): Promise<void> => {
   await prisma.llmCall.create({ data: { ...metrics, ...link } });
+};
+
+// Task state. A new task starts at BUILDING with loop 0 and $0 spent (DB defaults).
+export const createTask = async (specId: string): Promise<Task> => {
+  return toTask(await prisma.task.create({ data: { specId } }));
+};
+
+export const getTask = async (id: string): Promise<Task> => {
+  const row = await prisma.task.findUnique({ where: { id } });
+  if (!row) throw new Error(`No task found for id "${id}"`);
+  return toTask(row);
+};
+
+export const updateTask = async (
+  id: string,
+  data: Partial<Omit<Task, "id" | "specId">>,
+): Promise<Task> => {
+  return toTask(await prisma.task.update({ where: { id }, data }));
 };
