@@ -1,6 +1,7 @@
 import { prisma } from "./db.js";
 import { saveSpec } from "./store.js";
-import { advanceTask, isFinal, startTask } from "./orchestrator.js";
+import { startTask } from "./orchestrator.js";
+import { closeQueue, enqueueAdvance } from "./queue.js";
 
 const main = async () => {
   const spec = await saveSpec({
@@ -15,15 +16,14 @@ const main = async () => {
     ],
   });
 
-  // Step the state machine until it stops. In the next phase a BullMQ worker does this instead.
-  let task = await startTask(spec.id);
-  while (!isFinal(task)) {
-    task = await advanceTask(task.id);
-  }
-
-  console.log(`\nFinal status: ${task.status} after ${task.loop} loop(s)`);
-  console.log(`Total cost: $${task.totalCostUsd.toFixed(4)}`);
+  // Hand the task to the worker and exit — the worker (pnpm worker) runs the steps.
+  const task = await startTask(spec.id);
+  await enqueueAdvance(task.id);
+  console.log(`Task ${task.id} queued — watch the worker's output.`);
 };
 
-// Close the DB pool so the process can exit, even if the task failed.
-main().finally(() => prisma.$disconnect());
+// Close DB + Redis connections so the process can exit, even if something failed.
+main().finally(async () => {
+  await closeQueue();
+  await prisma.$disconnect();
+});
