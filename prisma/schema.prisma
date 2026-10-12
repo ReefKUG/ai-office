@@ -19,6 +19,7 @@ model Spec {
 
   codes   Code[]
   reviews Review[]
+  tasks   Task[]
 }
 
 model Code {
@@ -32,6 +33,7 @@ model Code {
 
   reviews  Review[]
   llmCalls LlmCall[]
+  tasks    Task[]
 }
 
 model Review {
@@ -45,6 +47,7 @@ model Review {
   createdAt DateTime @default(now())
 
   llmCalls LlmCall[]
+  tasks    Task[]
 }
 
 // One row per LLM call. A build call fills codeId, a review call fills reviewId.
@@ -62,4 +65,29 @@ model LlmCall {
   reviewId     String?
   review       Review?  @relation(fields: [reviewId], references: [id])
   createdAt    DateTime @default(now())
+}
+
+// Orchestrator state machine. Not an artifact: it tracks where a task is in the
+// Build <-> Review loop so each step can run on its own (and later as a BullMQ job).
+enum TaskStatus {
+  BUILDING
+  REVIEWING
+  PASSED
+  FAILED_MAX_LOOPS
+  FAILED_BUDGET
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  specId       String
+  spec         Spec       @relation(fields: [specId], references: [id])
+  status       TaskStatus @default(BUILDING)
+  loop         Int        @default(0) // Build passes done so far
+  totalCostUsd Decimal    @default(0) @db.Decimal(12, 6)
+  lastCodeId   String?
+  lastCode     Code?      @relation(fields: [lastCodeId], references: [id])
+  lastReviewId String?
+  lastReview   Review?    @relation(fields: [lastReviewId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
