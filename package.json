@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx --env-file=.env src/main.ts",
     "worker": "tsx --env-file=.env src/worker.ts",
+    "api": "tsx --env-file=.env src/server.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio"
