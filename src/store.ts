@@ -6,6 +6,9 @@ import type { CodeArtifact, ReviewArtifact, SpecArtifact, Task } from "../docs/o
 // Postgres-backed artifact store. Each artifact type has its own table; the DB generates IDs.
 // Rows are mapped back to the contract types so the rest of the app never sees Prisma types.
 
+// Thrown by get* when an ID doesn't exist — the API maps it to a 404.
+export class NotFoundError extends Error {}
+
 const toSpec = (row: Spec): SpecArtifact => ({
   id: row.id,
   type: "spec",
@@ -48,7 +51,7 @@ export const saveSpec = async ({ type, ...data }: Omit<SpecArtifact, "id">): Pro
 
 export const getSpec = async (id: string): Promise<SpecArtifact> => {
   const row = await prisma.spec.findUnique({ where: { id } });
-  if (!row) throw new Error(`No spec found for id "${id}"`);
+  if (!row) throw new NotFoundError(`No spec found for id "${id}"`);
   return toSpec(row);
 };
 
@@ -58,7 +61,7 @@ export const saveCode = async ({ type, ...data }: Omit<CodeArtifact, "id">): Pro
 
 export const getCode = async (id: string): Promise<CodeArtifact> => {
   const row = await prisma.code.findUnique({ where: { id } });
-  if (!row) throw new Error(`No code found for id "${id}"`);
+  if (!row) throw new NotFoundError(`No code found for id "${id}"`);
   return toCode(row);
 };
 
@@ -68,7 +71,7 @@ export const saveReview = async ({ type, ...data }: Omit<ReviewArtifact, "id">):
 
 export const getReview = async (id: string): Promise<ReviewArtifact> => {
   const row = await prisma.review.findUnique({ where: { id } });
-  if (!row) throw new Error(`No review found for id "${id}"`);
+  if (!row) throw new NotFoundError(`No review found for id "${id}"`);
   return toReview(row);
 };
 
@@ -87,7 +90,7 @@ export const createTask = async (specId: string): Promise<Task> => {
 
 export const getTask = async (id: string): Promise<Task> => {
   const row = await prisma.task.findUnique({ where: { id } });
-  if (!row) throw new Error(`No task found for id "${id}"`);
+  if (!row) throw new NotFoundError(`No task found for id "${id}"`);
   return toTask(row);
 };
 
