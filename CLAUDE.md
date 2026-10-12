@@ -16,10 +16,10 @@ made visible through metrics.
 - Artifact contracts live in `docs/office-contracts.ts`.
 
 ## Roadmap
-- **Phase 0 (current):** plain TypeScript script, no UI/DB. Spec → Dev agent writes code →
+- Phase 0 (done, `v0.1.0`): plain TypeScript script, no UI/DB. Spec → Dev agent writes code →
   QA agent checks against acceptance criteria → loop max 3 times → print total cost.
-- Phase 1: Fastify + Prisma + Postgres, orchestrator as a state machine, BullMQ jobs.
-- Phase 2: real GitHub repo (branches, PRs), tests run in Docker, GitHub Actions deploy to staging.
+- Phase 1 (done, `v0.2.0`): Fastify + Prisma + Postgres, orchestrator as a state machine, BullMQ jobs.
+- **Phase 2 (next):** real GitHub repo (branches, PRs), tests run in Docker, GitHub Actions deploy to staging.
 - Phase 3: Angular UI (office floor, task board, approvals, cost dashboard), user picks model per department.
 - Phase 4: Research + Architecture departments, smart model routing per task.
 
@@ -33,10 +33,22 @@ made visible through metrics.
   on FAIL until PASS, `BUDGET_CAP_USD`, or `MAX_REVIEW_LOOPS` is hit. `src/main.ts`
   seeds a sample spec and prints total cost. Verified working end-to-end.
 - Decision: model selection stays hardcoded in `config.ts` until Phase 3. Keep it simple.
-- Next: Phase 1 (Fastify + Prisma + Postgres, orchestrator as a state machine, BullMQ).
+
+## Phase 1 status — complete
+- `prisma/schema.prisma` + `src/store.ts`: artifacts, `Task` state and every `LlmCall` in Postgres.
+  Store maps Prisma rows back to the contract types; `get*` throws `NotFoundError`.
+- `src/orchestrator.ts`: state machine. `advanceTask(taskId)` runs exactly one step
+  (BUILDING → REVIEWING → PASSED | BUILDING | FAILED_MAX_LOOPS | FAILED_BUDGET).
+  Budget is checked before every LLM call.
+- `src/queue.ts` + `src/worker.ts`: BullMQ lives only here. A job is just `{ taskId }`;
+  the worker calls `advanceTask` and enqueues the next step until the task is final.
+- `src/server.ts` + `src/routes/tasks.ts`: `POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/code`.
+  Routes stay thin. `src/main.ts` is a demo client for the API.
+- How it all fits: `docs/HOW-IT-WORKS.md`.
 
 ## Conventions
-- pnpm, TypeScript, ESM (`"type": "module"`), run with `pnpm exec tsx --env-file=.env src/main.ts`
+- pnpm, TypeScript, ESM (`"type": "module"`)
+- Run: `docker compose up -d`, then `pnpm worker` + `pnpm api`; `pnpm start` submits a demo task
 - Style: `async` arrow functions with `return` by default
 - Works behind a corporate proxy; connection errors may be proxy-related
 
